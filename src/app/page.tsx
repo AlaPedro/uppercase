@@ -21,9 +21,6 @@ export default function Home() {
                 Uppercase cante karaokê
             </h1>
             <div className="w-full flex flex-col items-center">
-                <span className="text-white">
-                    Coloque a letra da música aqui
-                </span>
                 <textarea
                     placeholder="Copie a letra da música aqui!"
                     value={text}
