@@ -38,7 +38,7 @@ export default function Home() {
                         className="cursor-pointer bg-gray-100 p-2 hover:bg-purple-100 w-4/5"
                         onClick={() => handleLineCopy(line)}
                     >
-                        {line || '-----'}
+                        {line || ''}
                     </p>
                 ))}
                 <button
