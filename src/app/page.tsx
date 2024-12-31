@@ -29,7 +29,7 @@ export default function Home() {
                     placeholder="Copie a letra da música aqui!"
                     value={text}
                     onChange={handleChange}
-                    className="w-4/5 min-h-[400px] shadow-xl outline-none p-2"
+                    className="w-4/5 min-h-[400px] outline-none rounded-md p-2 shadow-lg"
                     name="uppercase"
                     id="uppercase"
                 ></textarea>
