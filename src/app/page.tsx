@@ -1,5 +1,5 @@
 'use client'
-
+import { ToastContainer, toast } from 'react-toastify'
 import { useState } from 'react'
 
 export default function Home() {
@@ -15,7 +15,7 @@ export default function Home() {
 
     const handleCoppyAll = () => {
         navigator.clipboard.writeText(text)
-        alert('Texto copiado')
+        toast.success('Texto copiado')
     }
 
     const lines = text.split('\n')
@@ -61,6 +61,7 @@ export default function Home() {
                     )}
                 </div>
             </div>
+            <ToastContainer />
         </div>
     )
 }
