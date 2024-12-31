@@ -5,9 +5,21 @@ import { useState } from 'react'
 export default function Home() {
     const [text, setText] = useState<string>('')
     const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const { selectionStart, selectionEnd } = event.target
         const textUppercase = event.target.value.toUpperCase()
         setText(textUppercase)
+
+        // Aguarda a atualização do estado para restaurar o cursor
+        setTimeout(() => {
+            const textarea = document.getElementById(
+                'uppercase'
+            ) as HTMLTextAreaElement
+            if (textarea) {
+                textarea.setSelectionRange(selectionStart, selectionEnd)
+            }
+        }, 0)
     }
+
     const handleLineCopy = (line: string) => {
         navigator.clipboard.writeText(line)
         console.log(`Linha copiada: ${line}`)
