@@ -13,6 +13,11 @@ export default function Home() {
         console.log(`Linha copiada: ${line}`)
     }
 
+    const handleCoppyAll = () => {
+        navigator.clipboard.writeText(text)
+        alert('Texto copiado')
+    }
+
     const lines = text.split('\n')
     return (
         <div className="min-w-screen min-h-screen bg-bg-ck flex flex-col justify-start items-center gap-10 py-8">
@@ -28,17 +33,32 @@ export default function Home() {
                     name="uppercase"
                     id="uppercase"
                 ></textarea>
+                {text.length > 0 && (
+                    <button
+                        onClick={handleCoppyAll}
+                        className="px-10 py-2 bg-orange-600 text-white font-bold rounded-md shadow-lg"
+                    >
+                        Copiar tudo
+                    </button>
+                )}
+
                 <div className="w-4/5">
-                    <span className="text-white ">Letra para copiar</span>
-                    {lines.map((line, index) => (
-                        <p
-                            key={index}
-                            className="cursor-pointer bg-gray-100 p-2 hover:bg-purple-600 hover:text-white"
-                            onClick={() => handleLineCopy(line)}
-                        >
-                            {line || ''}
-                        </p>
-                    ))}
+                    {text.length > 0 && (
+                        <div>
+                            <span className="text-white ">
+                                Letra para copiar ( linha )
+                            </span>
+                            {lines.map((line, index) => (
+                                <p
+                                    key={index}
+                                    className="cursor-pointer bg-gray-100 p-2 hover:bg-purple-600 hover:text-white"
+                                    onClick={() => handleLineCopy(line)}
+                                >
+                                    {line || ''}
+                                </p>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
