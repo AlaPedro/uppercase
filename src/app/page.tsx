@@ -19,7 +19,9 @@ export default function Home() {
 
   const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const { selectionStart, selectionEnd, scrollTop } = event.target;
-    const textUppercase = event.target.value.toUpperCase();
+    // Substitui hífens por espaços e converte para maiúsculas
+    const textWithoutHyphens = event.target.value.replace(/-/g, " ");
+    const textUppercase = textWithoutHyphens.toUpperCase();
 
     setText(textUppercase);
 
