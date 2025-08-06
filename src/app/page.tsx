@@ -103,9 +103,15 @@ export default function Home() {
           placeholder="Copie a letra da música aqui!"
           value={text}
           onChange={handleChange}
-          className={`w-4/5 md:w-3/5 min-h-[85vh] outline-none rounded-md p-2 shadow-lg py-10 pb-10 text-lg resize-y scroll-smooth ${
+          className={`w-4/5 md:w-3/5 min-h-[85vh] outline-none rounded-md p-2 shadow-lg py-10 pb-10 text-lg resize-y scroll-smooth relative ${
             isDark ? "bg-zinc-900 text-zinc-200" : "bg-zinc-100 text-zinc-900"
           }`}
+          style={{
+            backgroundImage: `linear-gradient(90deg, transparent 0%, transparent calc(45ch - 1px), rgba(147, 51, 234, 0.3) calc(45ch - 1px), rgba(147, 51, 234, 0.3) 45ch, transparent 45ch, transparent 100%)`,
+            backgroundSize: "100% 1.5em",
+            backgroundRepeat: "repeat-y",
+            lineHeight: "1.5em",
+          }}
           name="uppercase"
           ref={textareaRef}
           id="uppercase"></textarea>
