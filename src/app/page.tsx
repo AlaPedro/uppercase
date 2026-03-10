@@ -1,14 +1,27 @@
 "use client";
 import { ToastContainer, toast } from "react-toastify";
-import { useRef, useState } from "react";
-import { Lightbulb, Edit, Mic } from "lucide-react";
+import { useRef, useState, useEffect } from "react";
+import {
+  Lightbulb,
+  Edit,
+  Mic,
+  ChevronRight,
+  Undo2,
+  Play,
+  Pause,
+} from "lucide-react";
 
 export default function Home() {
   const [text, setText] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const singerContainerRef = useRef<HTMLDivElement | null>(null);
   const [isDark, setIsDark] = useState(true);
   const [isSingerMode, setIsSingerMode] = useState(false);
   const [highlightedLines, setHighlightedLines] = useState<number[]>([]);
+  const [isAutoScroll, setIsAutoScroll] = useState(false);
+  const [autoScrollSpeed, setAutoScrollSpeed] = useState(20); // pixels por segundo (5–50)
+  const autoScrollRafRef = useRef<number | null>(null);
+  const autoScrollLastTimeRef = useRef<number>(0);
 
   const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (isSingerMode) return; // Não permite edição no modo cantor
@@ -23,7 +36,7 @@ export default function Home() {
     // Aguarda a atualização do estado para restaurar o cursor e a rolagem
     setTimeout(() => {
       const textarea = document.getElementById(
-        "uppercase"
+        "uppercase",
       ) as HTMLTextAreaElement;
       if (textarea) {
         textarea.scrollTop = scrollTop;
@@ -44,37 +57,118 @@ export default function Home() {
   const toggleSingerMode = () => {
     setIsSingerMode(!isSingerMode);
     if (!isSingerMode) {
-      // Entrando no modo cantor: reseta highlights e scroll
       setHighlightedLines([]);
+      setIsAutoScroll(false);
       setTimeout(() => {
-        const div = document.querySelector(
-          "[data-singer-mode]"
-        ) as HTMLDivElement;
-        if (div) {
-          div.scrollTo({
-            top: 0,
-            behavior: "smooth",
-          });
-        }
+        window.scrollTo({ top: 0, behavior: "smooth" });
       }, 100);
     }
   };
 
-  const handleKeyDown = (
-    event: React.KeyboardEvent<HTMLDivElement | HTMLTextAreaElement>
-  ) => {
-    if (isSingerMode && event.key === " ") {
-      event.preventDefault();
-      const lines = text.split("\n").filter((line) => line.trim() !== "");
-      if (highlightedLines.length < lines.length) {
-        const newHighlightedLines = [
-          ...highlightedLines,
-          highlightedLines.length,
-        ];
-        setHighlightedLines(newHighlightedLines);
-      }
+  const advanceLine = () => {
+    const lines = text.split("\n").filter((line) => line.trim() !== "");
+    if (highlightedLines.length < lines.length) {
+      setHighlightedLines([...highlightedLines, highlightedLines.length]);
     }
   };
+
+  const clearLastLine = () => {
+    if (highlightedLines.length > 0) {
+      setHighlightedLines(highlightedLines.slice(0, -1));
+    }
+  };
+
+  const handleKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement | HTMLTextAreaElement>,
+  ) => {
+    if (!isSingerMode) return;
+    if (event.key === " ") {
+      event.preventDefault();
+      advanceLine();
+    } else if (event.key === "Backspace") {
+      event.preventDefault();
+      clearLastLine();
+    }
+  };
+
+  // Rolagem automática gradual: ao colorir uma nova linha (espaço), rola a PÁGINA INTEIRA até ela
+  useEffect(() => {
+    if (
+      !isSingerMode ||
+      highlightedLines.length === 0 ||
+      !singerContainerRef.current ||
+      !text.trim()
+    )
+      return;
+
+    const container = singerContainerRef.current;
+    const lines = text.split("\n");
+    const lastHighlightedNonEmptyIndex =
+      highlightedLines[highlightedLines.length - 1];
+
+    // Índice da linha destacada no array completo (incluindo linhas vazias)
+    let lineIndexInFull = 0;
+    let count = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() !== "") {
+        if (count === lastHighlightedNonEmptyIndex) {
+          lineIndexInFull = i;
+          break;
+        }
+        count++;
+      }
+    }
+
+    const style = getComputedStyle(container);
+    const lineHeightPx = parseFloat(style.lineHeight) || 24;
+    const containerTop = container.getBoundingClientRect().top + window.scrollY;
+    const lineTopOnPage = containerTop + lineIndexInFull * lineHeightPx;
+    const offsetFromViewportTop = 120;
+    const targetPageScrollY = Math.max(
+      0,
+      lineTopOnPage - offsetFromViewportTop,
+    );
+
+    window.scrollTo({
+      top: targetPageScrollY,
+      behavior: "smooth",
+    });
+  }, [isSingerMode, highlightedLines, text]);
+
+  // Rolagem automática contínua (quando ligada)
+  useEffect(() => {
+    if (!isSingerMode || !isAutoScroll) {
+      if (autoScrollRafRef.current) {
+        cancelAnimationFrame(autoScrollRafRef.current);
+        autoScrollRafRef.current = null;
+      }
+      return;
+    }
+    const maxScroll =
+      document.documentElement.scrollHeight - window.innerHeight;
+    const animate = (now: number) => {
+      const deltaSec = (now - autoScrollLastTimeRef.current) / 1000;
+      autoScrollLastTimeRef.current = now;
+      const currentScroll = window.scrollY;
+      if (currentScroll >= maxScroll - 1) {
+        autoScrollRafRef.current = requestAnimationFrame(animate);
+        return;
+      }
+      const toScroll = Math.min(
+        autoScrollSpeed * deltaSec,
+        maxScroll - currentScroll,
+      );
+      window.scrollBy(0, toScroll);
+      autoScrollRafRef.current = requestAnimationFrame(animate);
+    };
+    autoScrollLastTimeRef.current = performance.now();
+    autoScrollRafRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (autoScrollRafRef.current) {
+        cancelAnimationFrame(autoScrollRafRef.current);
+      }
+    };
+  }, [isSingerMode, isAutoScroll, autoScrollSpeed]);
 
   const renderHighlightedText = () => {
     if (!isSingerMode) return text;
@@ -114,6 +208,7 @@ export default function Home() {
       <div className="w-full flex flex-col items-center gap-4">
         {isSingerMode ? (
           <div
+            ref={singerContainerRef}
             onKeyDown={handleKeyDown}
             tabIndex={0}
             data-singer-mode
@@ -126,7 +221,6 @@ export default function Home() {
               backgroundRepeat: "repeat-y",
               lineHeight: "1.5em",
               whiteSpace: "pre-wrap",
-              overflowY: "auto",
             }}
             dangerouslySetInnerHTML={{ __html: renderHighlightedText() }}
           />
@@ -152,7 +246,8 @@ export default function Home() {
         {text.length > 0 && (
           <button
             onClick={handleCoppyAll}
-            className="px-10 py-2 bg-orange-600 text-white font-bold rounded-md shadow-lg">
+            className="px-10 py-2 bg-orange-600 text-white font-bold rounded-md shadow-lg"
+          >
             Copiar tudo
           </button>
         )}
@@ -160,7 +255,8 @@ export default function Home() {
 
       <button
         onClick={toggleSingerMode}
-        className="bg-orange-500 rounded-full p-2 cursor-pointer fixed left-2 top-[200px] drop-shadow-lg">
+        className="bg-orange-500 rounded-full p-2 cursor-pointer fixed left-2 top-[200px] drop-shadow-lg"
+      >
         {isSingerMode ? (
           <Edit size={30} color="white" />
         ) : (
@@ -169,9 +265,85 @@ export default function Home() {
       </button>
       <button
         onClick={handleTheme}
-        className="bg-orange-500 rounded-full p-2 cursor-pointer fixed left-2 top-[270px] drop-shadow-lg">
+        className="bg-orange-500 rounded-full p-2 cursor-pointer fixed left-2 top-[270px] drop-shadow-lg"
+      >
         <Lightbulb size={30} color={isDark ? "white" : "black"} />
       </button>
+      {isSingerMode && (
+        <>
+          <button
+            onClick={advanceLine}
+            title="Próxima linha (Espaço)"
+            className="bg-orange-500 rounded-full p-2 cursor-pointer fixed right-2 top-[200px] drop-shadow-lg hover:bg-orange-600 transition-colors"
+          >
+            <ChevronRight size={30} color="white" />
+          </button>
+          <button
+            onClick={clearLastLine}
+            title="Limpar última linha (Backspace)"
+            className="bg-orange-500 rounded-full p-2 cursor-pointer fixed right-2 top-[270px] drop-shadow-lg hover:bg-orange-600 transition-colors"
+          >
+            <Undo2 size={30} color="white" />
+          </button>
+          <div
+            className={`fixed right-2 top-[340px] flex flex-col gap-2 p-3 rounded-lg shadow-lg ${
+              isDark ? "bg-zinc-800" : "bg-zinc-200"
+            }`}
+          >
+            <span
+              className={`text-xs font-medium ${
+                isDark ? "text-zinc-300" : "text-zinc-700"
+              }`}
+            >
+              Rolagem auto
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsAutoScroll(!isAutoScroll)}
+                title={isAutoScroll ? "Pausar" : "Iniciar"}
+                className={`rounded-full p-2 transition-colors ${
+                  isAutoScroll
+                    ? "bg-amber-500 hover:bg-amber-600"
+                    : "bg-orange-500 hover:bg-orange-600"
+                }`}
+              >
+                {isAutoScroll ? (
+                  <Pause size={24} color="white" />
+                ) : (
+                  <Play size={24} color="white" />
+                )}
+              </button>
+              <div className="flex flex-col gap-0.5 min-w-[80px]">
+                <label
+                  htmlFor="speed"
+                  className={`text-[10px] ${
+                    isDark ? "text-zinc-400" : "text-zinc-600"
+                  }`}
+                >
+                  Velocidade
+                </label>
+                <input
+                  id="speed"
+                  type="range"
+                  min={10}
+                  max={50}
+                  step={5}
+                  value={autoScrollSpeed}
+                  onChange={(e) => setAutoScrollSpeed(Number(e.target.value))}
+                  className="w-full h-2 accent-orange-500"
+                />
+                <span
+                  className={`text-[10px] ${
+                    isDark ? "text-zinc-400" : "text-zinc-600"
+                  }`}
+                >
+                  {autoScrollSpeed} px/s
+                </span>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
       <ToastContainer />
     </div>
   );
