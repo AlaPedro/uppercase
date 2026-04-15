@@ -10,6 +10,8 @@ import {
   ChevronDown,
   ChevronUp,
   Music2,
+  Play,
+  Pause,
 } from "lucide-react";
 
 type LyricNote = { id: string; lineIndex: number; text: string };
@@ -36,9 +38,14 @@ export default function Home() {
   const lyricInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const chordInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const singerPaneRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [isDark, setIsDark] = useState(true);
   const [isSingerMode, setIsSingerMode] = useState(false);
   const [highlightedLines, setHighlightedLines] = useState<number[]>([]);
+  const [isAutoScroll, setIsAutoScroll] = useState(false);
+  const [autoScrollSpeed, setAutoScrollSpeed] = useState(20); // pixels por segundo (5–50)
+  const autoScrollRafRef = useRef<number | null>(null);
+  const autoScrollLastTimeRef = useRef<number>(0);
 
   const lyricLines = text === "" ? [] : text.split("\n");
 
@@ -50,6 +57,19 @@ export default function Home() {
       return prev.slice(0, n);
     });
   }, [text]);
+
+  const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (isSingerMode) return;
+    const { selectionStart, selectionEnd, scrollTop } = event.target;
+    setText(processLyricInput(event.target.value));
+    setTimeout(() => {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        textarea.scrollTop = scrollTop;
+        textarea.setSelectionRange(selectionStart, selectionEnd);
+      }
+    }, 0);
+  };
 
   const handleCoppyAll = () => {
     navigator.clipboard.writeText(text);
@@ -64,11 +84,13 @@ export default function Home() {
     setIsSingerMode(!isSingerMode);
     if (!isSingerMode) {
       setHighlightedLines([]);
+      setIsAutoScroll(false);
       setTimeout(() => {
         const div = singerPaneRef.current;
         if (div) {
           div.scrollTop = 0;
         }
+        window.scrollTo({ top: 0, behavior: "smooth" });
       }, 0);
     }
   };
@@ -134,8 +156,7 @@ export default function Home() {
     if (event.key === " ") {
       event.preventDefault();
       advanceSingerLine();
-    }
-    if (event.key === "Backspace") {
+    } else if (event.key === "Backspace") {
       event.preventDefault();
       retreatSingerLine();
     }
@@ -324,6 +345,85 @@ export default function Home() {
     setNotes((prev) => prev.filter((n) => n.id !== id));
   };
 
+  // Rolagem automática gradual: ao colorir uma nova linha (espaço), rola a PÁGINA INTEIRA até ela
+  useEffect(() => {
+    if (
+      !isSingerMode ||
+      highlightedLines.length === 0 ||
+      !singerPaneRef.current ||
+      !text.trim()
+    )
+      return;
+
+    const container = singerPaneRef.current;
+    const lines = text.split("\n");
+    const lastHighlightedNonEmptyIndex =
+      highlightedLines[highlightedLines.length - 1];
+
+    // Índice da linha destacada no array completo (incluindo linhas vazias)
+    let lineIndexInFull = 0;
+    let count = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() !== "") {
+        if (count === lastHighlightedNonEmptyIndex) {
+          lineIndexInFull = i;
+          break;
+        }
+        count++;
+      }
+    }
+
+    const style = getComputedStyle(container);
+    const lineHeightPx = parseFloat(style.lineHeight) || 24;
+    const containerTop = container.getBoundingClientRect().top + window.scrollY;
+    const lineTopOnPage = containerTop + lineIndexInFull * lineHeightPx;
+    const offsetFromViewportTop = 120;
+    const targetPageScrollY = Math.max(
+      0,
+      lineTopOnPage - offsetFromViewportTop,
+    );
+
+    window.scrollTo({
+      top: targetPageScrollY,
+      behavior: "smooth",
+    });
+  }, [isSingerMode, highlightedLines, text]);
+
+  // Rolagem automática contínua (quando ligada)
+  useEffect(() => {
+    if (!isSingerMode || !isAutoScroll) {
+      if (autoScrollRafRef.current) {
+        cancelAnimationFrame(autoScrollRafRef.current);
+        autoScrollRafRef.current = null;
+      }
+      return;
+    }
+    const maxScroll =
+      document.documentElement.scrollHeight - window.innerHeight;
+    const animate = (now: number) => {
+      const deltaSec = (now - autoScrollLastTimeRef.current) / 1000;
+      autoScrollLastTimeRef.current = now;
+      const currentScroll = window.scrollY;
+      if (currentScroll >= maxScroll - 1) {
+        autoScrollRafRef.current = requestAnimationFrame(animate);
+        return;
+      }
+      const toScroll = Math.min(
+        autoScrollSpeed * deltaSec,
+        maxScroll - currentScroll,
+      );
+      window.scrollBy(0, toScroll);
+      autoScrollRafRef.current = requestAnimationFrame(animate);
+    };
+    autoScrollLastTimeRef.current = performance.now();
+    autoScrollRafRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (autoScrollRafRef.current) {
+        cancelAnimationFrame(autoScrollRafRef.current);
+      }
+    };
+  }, [isSingerMode, isAutoScroll, autoScrollSpeed]);
+
   const renderHighlightedText = () => {
     if (!isSingerMode) return text;
 
@@ -406,7 +506,6 @@ export default function Home() {
             style={{
               ...lineGridStyle,
               whiteSpace: "pre-wrap",
-              overflowY: "auto",
             }}
             dangerouslySetInnerHTML={{ __html: renderHighlightedText() }}
           />
@@ -419,7 +518,10 @@ export default function Home() {
               <textarea
                 placeholder="Cole ou digite a letra aqui. Enter cria novo verso."
                 value={text}
-                onChange={(e) => setText(processLyricInput(e.target.value))}
+                onChange={handleChange}
+                name="uppercase"
+                ref={textareaRef}
+                id="uppercase"
                 className="w-full min-h-[40vh] bg-transparent outline-none border-none resize-none uppercase"
                 style={{ lineHeight: "1.5em" }}
               />
@@ -595,6 +697,67 @@ export default function Home() {
       >
         <Lightbulb size={30} color={isDark ? "white" : "black"} />
       </button>
+      {isSingerMode && (
+        <>
+          <div
+            className={`fixed right-2 top-[340px] flex flex-col gap-2 p-3 rounded-lg shadow-lg ${
+              isDark ? "bg-zinc-800" : "bg-zinc-200"
+            }`}
+          >
+            <span
+              className={`text-xs font-medium ${
+                isDark ? "text-zinc-300" : "text-zinc-700"
+              }`}
+            >
+              Rolagem auto
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsAutoScroll(!isAutoScroll)}
+                title={isAutoScroll ? "Pausar" : "Iniciar"}
+                className={`rounded-full p-2 transition-colors ${
+                  isAutoScroll
+                    ? "bg-amber-500 hover:bg-amber-600"
+                    : "bg-orange-500 hover:bg-orange-600"
+                }`}
+              >
+                {isAutoScroll ? (
+                  <Pause size={24} color="white" />
+                ) : (
+                  <Play size={24} color="white" />
+                )}
+              </button>
+              <div className="flex flex-col gap-0.5 min-w-[80px]">
+                <label
+                  htmlFor="speed"
+                  className={`text-[10px] ${
+                    isDark ? "text-zinc-400" : "text-zinc-600"
+                  }`}
+                >
+                  Velocidade
+                </label>
+                <input
+                  id="speed"
+                  type="range"
+                  min={10}
+                  max={50}
+                  step={5}
+                  value={autoScrollSpeed}
+                  onChange={(e) => setAutoScrollSpeed(Number(e.target.value))}
+                  className="w-full h-2 accent-orange-500"
+                />
+                <span
+                  className={`text-[10px] ${
+                    isDark ? "text-zinc-400" : "text-zinc-600"
+                  }`}
+                >
+                  {autoScrollSpeed} px/s
+                </span>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
       <ToastContainer />
     </div>
   );
