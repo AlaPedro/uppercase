@@ -12,6 +12,7 @@ import {
   Music2,
   Play,
   Pause,
+  Link2,
 } from "lucide-react";
 
 type LyricNote = { id: string; lineIndex: number; text: string };
@@ -69,6 +70,9 @@ export default function Home() {
   const [autoScrollSpeed, setAutoScrollSpeed] = useState(20); // pixels por segundo (5–50)
   const autoScrollRafRef = useRef<number | null>(null);
   const autoScrollLastTimeRef = useRef<number>(0);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
 
   const lyricLines = text === "" ? [] : text.split("\n");
 
@@ -195,6 +199,47 @@ export default function Home() {
   const handleCoppyAll = () => {
     navigator.clipboard.writeText(text);
     toast.success("Letra copiada (sem cifras ou notas)");
+  };
+
+  const handleImportCifraClub = async () => {
+    const u = importUrl.trim();
+    if (!u) {
+      toast.error("Cole a URL da cifra do Cifra Club");
+      return;
+    }
+    setImportBusy(true);
+    try {
+      const res = await fetch("/api/import-cifraclub", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: u }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { text?: string; chordLines?: string[]; error?: string }
+        | null;
+      if (!res.ok || !data || typeof data.text !== "string") {
+        toast.error(data?.error ?? "Não foi possível importar");
+        return;
+      }
+      const lines = typeof data.text === "string" ? data.text.split("\n") : [];
+      const n = lines.length;
+      const rawChords = Array.isArray(data.chordLines) ? data.chordLines : [];
+      const nextChords = Array.from({ length: n }, (_, i) => rawChords[i] ?? "");
+      setText(processLyricInput(data.text));
+      setChordLines(nextChords);
+      setNotes([]);
+      setHighlightedLines([]);
+      setIsSingerMode(false);
+      setIsAutoScroll(false);
+      setImportOpen(false);
+      setImportUrl("");
+      toast.success("Cifra importada");
+      setTimeout(() => syncEditTextareaLayout(), 0);
+    } catch {
+      toast.error("Erro de rede ao importar");
+    } finally {
+      setImportBusy(false);
+    }
   };
 
   const handleTheme = () => {
@@ -734,6 +779,14 @@ export default function Home() {
       >
         <Lightbulb size={30} color={isDark ? "white" : "black"} />
       </button>
+      <button
+        type="button"
+        onClick={() => setImportOpen(true)}
+        title="Importar do Cifra Club"
+        className="bg-orange-500 rounded-full p-2 cursor-pointer fixed left-2 top-[340px] drop-shadow-lg"
+      >
+        <Link2 size={28} color="white" />
+      </button>
       {isSingerMode && (
         <>
           <div
@@ -796,6 +849,73 @@ export default function Home() {
         </>
       )}
       <ToastContainer />
+
+      {importOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="import-cifraclub-title"
+        >
+          <div
+            className={`w-full max-w-lg rounded-lg border p-5 shadow-2xl ${
+              isDark
+                ? "border-zinc-600 bg-zinc-900 text-zinc-100"
+                : "border-zinc-200 bg-white text-zinc-900"
+            }`}
+          >
+            <h2 id="import-cifraclub-title" className="text-lg font-semibold">
+              Importar do Cifra Club
+            </h2>
+            <p
+              className={`mt-2 text-sm ${isDark ? "text-zinc-400" : "text-zinc-600"}`}
+            >
+              Cole o link da página da música (ex.: cifraclub.com.br/…). A letra
+              e a faixa de cifras são lidas do bloco <code className="text-xs">&lt;pre&gt;</code> da página.
+            </p>
+            <input
+              type="url"
+              value={importUrl}
+              onChange={(e) => setImportUrl(e.target.value)}
+              placeholder="https://www.cifraclub.com.br/..."
+              disabled={importBusy}
+              className={`mt-4 w-full rounded-md border px-3 py-2 text-sm outline-none ring-orange-500 focus:ring-2 ${
+                isDark
+                  ? "border-zinc-600 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500"
+                  : "border-zinc-300 bg-white text-zinc-900"
+              }`}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleImportCifraClub();
+              }}
+            />
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={importBusy}
+                onClick={() => {
+                  setImportOpen(false);
+                  setImportUrl("");
+                }}
+                className={`rounded-md px-4 py-2 text-sm font-medium ${
+                  isDark
+                    ? "bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+                    : "bg-zinc-200 text-zinc-800 hover:bg-zinc-300"
+                }`}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={importBusy}
+                onClick={() => void handleImportCifraClub()}
+                className="rounded-md bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
+              >
+                {importBusy ? "Importando…" : "Importar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
