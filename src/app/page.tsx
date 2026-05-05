@@ -1,6 +1,6 @@
 "use client";
 import { ToastContainer, toast } from "react-toastify";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Lightbulb,
   Edit,
@@ -28,6 +28,21 @@ function processLyricInput(raw: string) {
   return raw.replace(/-/g, " ").toUpperCase();
 }
 
+function restoreWindowScroll(left: number, top: number) {
+  window.scrollTo(left, top);
+}
+
+/**
+ * Evita que o navegador "puxe" a página ao mudar altura do textarea ou restaurar seleção.
+ */
+function scheduleScrollRestore(left: number, top: number) {
+  const apply = () => restoreWindowScroll(left, top);
+  requestAnimationFrame(() => {
+    apply();
+    requestAnimationFrame(apply);
+  });
+}
+
 export default function Home() {
   const [text, setText] = useState<string>("");
   const [chordLines, setChordLines] = useState<string[]>([]);
@@ -35,10 +50,18 @@ export default function Home() {
   const [openChordRows, setOpenChordRows] = useState<Set<number>>(
     () => new Set()
   );
-  const lyricInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const chordInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const singerPaneRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const [editLineMetrics, setEditLineMetrics] = useState({
+    lh: 24,
+    padTop: 0,
+  });
+  const [editTextareaHeight, setEditTextareaHeight] = useState<number | null>(
+    null,
+  );
+  const [viewportMd, setViewportMd] = useState(false);
   const [isDark, setIsDark] = useState(true);
   const [isSingerMode, setIsSingerMode] = useState(false);
   const [highlightedLines, setHighlightedLines] = useState<number[]>([]);
@@ -58,15 +81,101 @@ export default function Home() {
     });
   }, [text]);
 
+  useEffect(() => {
+    const n = text === "" ? 0 : text.split("\n").length;
+    if (n === 0) return;
+    const maxIdx = n - 1;
+    setNotes((prev) => {
+      const next = prev.map((note) => ({
+        ...note,
+        lineIndex: Math.min(note.lineIndex, maxIdx),
+      }));
+      const same =
+        next.length === prev.length &&
+        next.every(
+          (note, i) =>
+            note.lineIndex === prev[i].lineIndex && note.id === prev[i].id
+        );
+      return same ? prev : next;
+    });
+  }, [text]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const apply = () => setViewportMd(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  const syncEditTextareaLayout = useCallback(() => {
+    if (isSingerMode) return;
+    const surface = editorSurfaceRef.current;
+    const ta = textareaRef.current;
+    if (!surface || !ta) return;
+
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+
+    const sStyle = getComputedStyle(surface);
+    const padT = parseFloat(sStyle.paddingTop) || 0;
+    const padB = parseFloat(sStyle.paddingBottom) || 0;
+    const declaredMin = parseFloat(sStyle.minHeight);
+    const minInner =
+      Number.isFinite(declaredMin) && declaredMin > 0
+        ? Math.max(0, declaredMin - padT - padB)
+        : (typeof window !== "undefined" ? window.innerHeight * 0.85 : 600) -
+          padT -
+          padB;
+
+    ta.style.overflow = "hidden";
+    ta.style.height = "auto";
+    const contentH = ta.scrollHeight;
+    const nextH = Math.max(minInner, contentH);
+    ta.style.height = `${nextH}px`;
+
+    const tcs = getComputedStyle(ta);
+    let lh = parseFloat(tcs.lineHeight);
+    const padTop = parseFloat(tcs.paddingTop) || 0;
+    if (!Number.isFinite(lh) || lh <= 0) {
+      const fs = parseFloat(tcs.fontSize) || 16;
+      lh = fs * 1.5;
+    }
+    setEditLineMetrics({ lh, padTop });
+    setEditTextareaHeight(nextH);
+    scheduleScrollRestore(scrollX, scrollY);
+  }, [isSingerMode]);
+
+  useLayoutEffect(() => {
+    if (isSingerMode) return;
+    syncEditTextareaLayout();
+  }, [viewportMd, text, lyricLines.length, isSingerMode, syncEditTextareaLayout]);
+
+  useLayoutEffect(() => {
+    if (isSingerMode) return;
+    const surface = editorSurfaceRef.current;
+    if (!surface || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => syncEditTextareaLayout());
+    ro.observe(surface);
+    return () => ro.disconnect();
+  }, [isSingerMode, syncEditTextareaLayout]);
+
   const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (isSingerMode) return;
-    const { selectionStart, selectionEnd, scrollTop } = event.target;
-    setText(processLyricInput(event.target.value));
+    const raw = event.target.value;
+    const { selectionStart, selectionEnd } = event.target;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const processed = processLyricInput(raw);
+    setText(processed);
     setTimeout(() => {
       const textarea = textareaRef.current;
       if (textarea) {
-        textarea.scrollTop = scrollTop;
-        textarea.setSelectionRange(selectionStart, selectionEnd);
+        const max = textarea.value.length;
+        const a = Math.min(selectionStart, max);
+        const b = Math.min(selectionEnd, max);
+        textarea.setSelectionRange(a, b);
+        scheduleScrollRestore(scrollX, scrollY);
       }
     }, 0);
   };
@@ -162,13 +271,6 @@ export default function Home() {
     }
   };
 
-  const updateLyricLine = (lineIndex: number, raw: string) => {
-    const processed = processLyricInput(raw);
-    const lines = text.split("\n");
-    lines[lineIndex] = processed;
-    setText(lines.join("\n"));
-  };
-
   const updateChordLine = (lineIndex: number, value: string) => {
     setChordLines((prev) => {
       const next = [...prev];
@@ -192,134 +294,6 @@ export default function Home() {
     setOpenChordRows((prev) => {
       const next = new Set(prev);
       next.delete(lineIndex);
-      return next;
-    });
-  };
-
-  const insertLineAfter = (lineIndex: number) => {
-    const lines = text.split("\n");
-    const newLines = [
-      ...lines.slice(0, lineIndex + 1),
-      "",
-      ...lines.slice(lineIndex + 1),
-    ];
-    setText(newLines.join("\n"));
-    setChordLines((prev) => {
-      const p = [...prev];
-      while (p.length < lines.length) p.push("");
-      return [...p.slice(0, lineIndex + 1), "", ...p.slice(lineIndex + 1)];
-    });
-    setNotes((prev) =>
-      prev.map((note) =>
-        note.lineIndex > lineIndex
-          ? { ...note, lineIndex: note.lineIndex + 1 }
-          : note
-      )
-    );
-    setOpenChordRows((prev) => {
-      const next = new Set<number>();
-      for (const j of prev) {
-        if (j <= lineIndex) next.add(j);
-        else next.add(j + 1);
-      }
-      return next;
-    });
-    setTimeout(() => {
-      lyricInputRefs.current[lineIndex + 1]?.focus();
-    }, 0);
-  };
-
-  const mergeWithPrevious = (lineIndex: number) => {
-    if (lineIndex <= 0) return;
-    const lines = text.split("\n");
-    const merged = lines[lineIndex - 1] + lines[lineIndex];
-    const newLines = [
-      ...lines.slice(0, lineIndex - 1),
-      merged,
-      ...lines.slice(lineIndex + 1),
-    ];
-    setText(newLines.join("\n"));
-    setChordLines((prev) => {
-      const p = [...prev];
-      while (p.length < lines.length) p.push("");
-      const combinedChord = [p[lineIndex - 1], p[lineIndex]]
-        .filter(Boolean)
-        .join(" ");
-      return [
-        ...p.slice(0, lineIndex - 1),
-        combinedChord,
-        ...p.slice(lineIndex + 1),
-      ];
-    });
-    setNotes((prev) =>
-      prev.flatMap((note) => {
-        if (note.lineIndex === lineIndex) {
-          return [{ ...note, lineIndex: lineIndex - 1 }];
-        }
-        if (note.lineIndex > lineIndex) {
-          return [{ ...note, lineIndex: note.lineIndex - 1 }];
-        }
-        return [note];
-      })
-    );
-    setOpenChordRows((prev) => {
-      const next = new Set<number>();
-      for (const j of prev) {
-        if (j < lineIndex - 1) next.add(j);
-        else if (j === lineIndex - 1 || j === lineIndex) next.add(lineIndex - 1);
-        else next.add(j - 1);
-      }
-      return next;
-    });
-    setTimeout(() => {
-      const el = lyricInputRefs.current[lineIndex - 1];
-      if (el) {
-        el.focus();
-        const pos = el.value.length;
-        el.setSelectionRange(pos, pos);
-      }
-    }, 0);
-  };
-
-  const handleLyricPaste = (
-    lineIndex: number,
-    e: React.ClipboardEvent<HTMLInputElement>
-  ) => {
-    const pasted = e.clipboardData.getData("text");
-    if (!pasted.includes("\n")) return;
-    e.preventDefault();
-    const newSegments = pasted.split("\n").map(processLyricInput);
-    const oldLines = text.split("\n");
-    const merged = [
-      ...oldLines.slice(0, lineIndex),
-      ...newSegments,
-      ...oldLines.slice(lineIndex + 1),
-    ];
-    setText(merged.join("\n"));
-    setChordLines((prev) => {
-      const padded = [...prev];
-      while (padded.length < oldLines.length) padded.push("");
-      return [
-        ...padded.slice(0, lineIndex),
-        ...Array(newSegments.length).fill(""),
-        ...padded.slice(lineIndex + 1),
-      ];
-    });
-    const delta = newSegments.length - 1;
-    setNotes((prev) =>
-      prev.map((note) => {
-        if (note.lineIndex < lineIndex) return note;
-        if (note.lineIndex === lineIndex) return { ...note, lineIndex };
-        return { ...note, lineIndex: note.lineIndex + delta };
-      })
-    );
-    setOpenChordRows((prev) => {
-      const next = new Set<number>();
-      for (const j of prev) {
-        if (j < lineIndex) next.add(j);
-        else if (j === lineIndex) next.add(lineIndex);
-        else next.add(j + delta);
-      }
       return next;
     });
   };
@@ -478,6 +452,10 @@ export default function Home() {
     isDark ? "bg-zinc-900 text-zinc-200" : "bg-zinc-100 text-zinc-900"
   }`;
 
+  const editEditorSurfaceClass = `w-4/5 md:w-3/5 min-h-[85vh] outline-none rounded-md p-2 shadow-lg py-10 pb-10 text-lg relative ${
+    isDark ? "bg-zinc-900 text-zinc-200" : "bg-zinc-100 text-zinc-900"
+  }`;
+
   const lineGridStyle: React.CSSProperties = {
     backgroundImage: `linear-gradient(90deg, transparent 0%, transparent calc(45ch - 1px), rgba(147, 51, 234, 0.3) calc(45ch - 1px), rgba(147, 51, 234, 0.3) 45ch, transparent 45ch, transparent 100%)`,
     backgroundSize: "100% 1.5em",
@@ -511,141 +489,153 @@ export default function Home() {
           />
         ) : (
           <div
-            className={`${editorSurfaceClass} scroll-smooth pr-44 md:pr-52`}
-            style={{ ...lineGridStyle, overflowY: "auto" }}
+            ref={editorSurfaceRef}
+            className={editEditorSurfaceClass}
+            style={{ ...lineGridStyle, overflow: "visible" }}
           >
-            {lyricLines.length === 0 ? (
+            <div className="grid w-full grid-cols-1 items-start gap-x-3 gap-y-3 md:grid-cols-[minmax(0,1fr)_13.5rem]">
               <textarea
-                placeholder="Cole ou digite a letra aqui. Enter cria novo verso."
+                placeholder="Cole ou digite a letra aqui. Enter quebra o verso na posição do cursor. Só a página rola."
                 value={text}
                 onChange={handleChange}
                 name="uppercase"
                 ref={textareaRef}
                 id="uppercase"
-                className="w-full min-h-[40vh] bg-transparent outline-none border-none resize-none uppercase"
-                style={{ lineHeight: "1.5em" }}
+                className="min-w-0 w-full resize-none bg-transparent p-0 outline-none border-none uppercase"
+                style={{
+                  height: editTextareaHeight ?? undefined,
+                  minHeight: editTextareaHeight ? undefined : "10rem",
+                  lineHeight: "1.5em",
+                  whiteSpace: "pre",
+                  overflow: "hidden",
+                  overflowWrap: "normal",
+                }}
+                spellCheck={false}
               />
-            ) : (
-              <div className="flex flex-col gap-1">
-                {lyricLines.map((line, i) => {
-                  const lineNotes = notes.filter((n) => n.lineIndex === i);
-                  const showChordRow = chordRowVisibleForLine(i);
-                  return (
-                    <div
-                      key={`row-${i}`}
-                      className="relative flex flex-col gap-0.5 border-b border-zinc-700/30 pb-1"
-                    >
-                      {showChordRow && (
-                        <div className="flex items-center gap-1 pr-1">
-                          <input
-                            ref={(el) => {
-                              chordInputRefs.current[i] = el;
-                            }}
-                            type="text"
-                            value={chordLines[i] ?? ""}
-                            onChange={(e) =>
-                              updateChordLine(i, e.target.value)
-                            }
-                            placeholder="Cifra (ex.: C F G7 Am)"
-                            className="min-w-0 flex-1 bg-transparent font-mono text-sm text-purple-400 outline-none placeholder:text-purple-400/40"
-                            style={{ lineHeight: "1.5em" }}
-                            spellCheck={false}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeChordRowUi(i)}
-                            title="Remover cifra desta linha"
-                            className="shrink-0 rounded p-1 text-purple-400/70 hover:bg-zinc-800/80 hover:text-purple-300"
-                            aria-label="Remover cifra desta linha"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                      )}
-                      <div className="flex items-start gap-2">
-                        <input
-                          ref={(el) => {
-                            lyricInputRefs.current[i] = el;
-                          }}
-                          type="text"
-                          value={line}
-                          onChange={(e) => updateLyricLine(i, e.target.value)}
-                          onPaste={(e) => handleLyricPaste(i, e)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                              e.preventDefault();
-                              insertLineAfter(i);
-                            }
-                            if (
-                              e.key === "Backspace" &&
-                              e.currentTarget.selectionStart === 0 &&
-                              e.currentTarget.selectionEnd === 0 &&
-                              i > 0
-                            ) {
-                              e.preventDefault();
-                              mergeWithPrevious(i);
-                            }
-                          }}
-                          className="flex-1 min-w-0 bg-transparent outline-none border-none uppercase"
-                          style={{ lineHeight: "1.5em" }}
-                          spellCheck={false}
-                        />
-                        {!showChordRow && (
-                          <button
-                            type="button"
-                            onClick={() => revealChordRow(i)}
-                            title="Adicionar cifra nesta linha"
-                            className="shrink-0 rounded-md p-1.5 text-purple-400 hover:bg-zinc-800/80"
-                          >
-                            <Music2 size={20} />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => addNote(i)}
-                          title="Adicionar nota (post-it)"
-                          className="shrink-0 rounded-md p-1.5 text-amber-300 hover:bg-zinc-800/80"
+              {lyricLines.length > 0 && (
+                <aside
+                  aria-label="Cifras e notas por linha"
+                  className={`relative w-full shrink-0 border-t border-zinc-700/30 pt-3 md:border-t-0 md:border-l md:pl-3 md:pt-0 ${
+                    isDark ? "md:border-zinc-600/50" : "md:border-zinc-300"
+                  }`}
+                  style={
+                    viewportMd && editTextareaHeight != null
+                      ? {
+                          height: editTextareaHeight,
+                          minHeight: editTextareaHeight,
+                        }
+                      : undefined
+                  }
+                >
+                  {lyricLines.map((_, i) => {
+                    const lineNotes = notes.filter((n) => n.lineIndex === i);
+                    const showChordRow = chordRowVisibleForLine(i);
+                    const { lh, padTop } = editLineMetrics;
+                    const rowTop = padTop + i * lh;
+                    return (
+                      <div key={`row-${i}`} className="md:contents">
+                        <div
+                          className="relative z-[1] mb-3 flex min-h-[2.5rem] flex-col gap-2 rounded-md border border-zinc-700/25 p-2 last:mb-0 md:mb-0 md:min-h-0 md:flex-row md:items-center md:gap-1 md:border-0 md:p-0"
+                          style={
+                            viewportMd
+                              ? {
+                                  position: "absolute",
+                                  top: rowTop,
+                                  left: 0,
+                                  right: 0,
+                                  height: lh,
+                                }
+                              : undefined
+                          }
                         >
-                          <StickyNote size={20} />
-                        </button>
-                      </div>
-                      {lineNotes.length > 0 && (
-                        <div className="absolute left-full top-0 ml-2 flex w-40 flex-col gap-2 pl-1">
-                          {lineNotes.map((n) => (
-                            <div
-                              key={n.id}
-                              className="relative rounded-sm bg-amber-200 p-2 text-xs font-medium text-amber-950 shadow-md ring-1 ring-amber-400/40"
-                              style={{
-                                transform: "rotate(-1.5deg)",
-                                boxShadow: "3px 3px 0 rgba(0,0,0,0.12)",
-                              }}
-                            >
+                          {showChordRow ? (
+                            <div className="flex min-w-0 flex-1 items-center gap-1">
+                              <input
+                                ref={(el) => {
+                                  chordInputRefs.current[i] = el;
+                                }}
+                                type="text"
+                                value={chordLines[i] ?? ""}
+                                onChange={(e) =>
+                                  updateChordLine(i, e.target.value)
+                                }
+                                placeholder="Cifra"
+                                className="min-w-0 flex-1 bg-zinc-950/20 font-mono text-xs text-purple-400 outline-none placeholder:text-purple-400/40 md:bg-transparent md:text-sm"
+                                style={{ lineHeight: "1.5em" }}
+                                spellCheck={false}
+                              />
                               <button
                                 type="button"
-                                onClick={() => removeNote(n.id)}
-                                className="absolute -right-1 -top-1 rounded-full bg-amber-900 p-0.5 text-amber-100 hover:bg-amber-950"
-                                aria-label="Remover nota"
+                                onClick={() => removeChordRowUi(i)}
+                                title="Remover cifra desta linha"
+                                className="shrink-0 rounded p-1 text-purple-400/70 hover:bg-zinc-800/80 hover:text-purple-300"
+                                aria-label="Remover cifra desta linha"
                               >
-                                <X size={12} />
+                                <X size={16} />
                               </button>
-                              <textarea
-                                value={n.text}
-                                onChange={(e) =>
-                                  updateNoteText(n.id, e.target.value)
-                                }
-                                className="mt-2 w-full resize-none bg-transparent outline-none"
-                                rows={3}
-                                style={{ lineHeight: "1.35em" }}
-                              />
                             </div>
-                          ))}
+                          ) : null}
+                          <div className="flex shrink-0 items-center gap-0.5">
+                            {!showChordRow ? (
+                              <button
+                                type="button"
+                                onClick={() => revealChordRow(i)}
+                                title="Adicionar cifra nesta linha"
+                                className="shrink-0 rounded-md p-1 text-purple-400 hover:bg-zinc-800/80"
+                              >
+                                <Music2 size={18} />
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => addNote(i)}
+                              title="Adicionar nota (post-it)"
+                              className="shrink-0 rounded-md p-1 text-amber-300 hover:bg-zinc-800/80"
+                            >
+                              <StickyNote size={18} />
+                            </button>
+                          </div>
+                          {lineNotes.length > 0 ? (
+                            <div
+                              className={`flex flex-col gap-2 md:absolute md:left-full md:top-0 md:z-20 md:ml-3 md:w-40`}
+                            >
+                              {lineNotes.map((n) => (
+                                <div
+                                  key={n.id}
+                                  className="relative rounded-sm bg-amber-200 p-2 text-xs font-medium text-amber-950 shadow-md ring-1 ring-amber-400/40"
+                                  style={{
+                                    transform: "rotate(-1.5deg)",
+                                    boxShadow: "3px 3px 0 rgba(0,0,0,0.12)",
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => removeNote(n.id)}
+                                    className="absolute -right-1 -top-1 rounded-full bg-amber-900 p-0.5 text-amber-100 hover:bg-amber-950"
+                                    aria-label="Remover nota"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                  <textarea
+                                    value={n.text}
+                                    onChange={(e) =>
+                                      updateNoteText(n.id, e.target.value)
+                                    }
+                                    className="mt-2 w-full resize-none bg-transparent outline-none"
+                                    rows={3}
+                                    style={{ lineHeight: "1.35em" }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                      </div>
+                    );
+                  })}
+                </aside>
+              )}
+            </div>
           </div>
         )}
         {text.length > 0 && (
