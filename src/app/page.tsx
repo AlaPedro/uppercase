@@ -10,8 +10,6 @@ import {
   ChevronDown,
   ChevronUp,
   Music2,
-  Play,
-  Pause,
   Link2,
 } from "lucide-react";
 
@@ -66,10 +64,6 @@ export default function Home() {
   const [isDark, setIsDark] = useState(true);
   const [isSingerMode, setIsSingerMode] = useState(false);
   const [highlightedLines, setHighlightedLines] = useState<number[]>([]);
-  const [isAutoScroll, setIsAutoScroll] = useState(false);
-  const [autoScrollSpeed, setAutoScrollSpeed] = useState(20); // pixels por segundo (5–50)
-  const autoScrollRafRef = useRef<number | null>(null);
-  const autoScrollLastTimeRef = useRef<number>(0);
   const [importOpen, setImportOpen] = useState(false);
   const [importUrl, setImportUrl] = useState("");
   const [importBusy, setImportBusy] = useState(false);
@@ -230,7 +224,6 @@ export default function Home() {
       setNotes([]);
       setHighlightedLines([]);
       setIsSingerMode(false);
-      setIsAutoScroll(false);
       setImportOpen(false);
       setImportUrl("");
       toast.success("Cifra importada");
@@ -250,7 +243,6 @@ export default function Home() {
     setIsSingerMode(!isSingerMode);
     if (!isSingerMode) {
       setHighlightedLines([]);
-      setIsAutoScroll(false);
       setTimeout(() => {
         const div = singerPaneRef.current;
         if (div) {
@@ -416,41 +408,6 @@ export default function Home() {
     });
   }, [isSingerMode, highlightedLines, text]);
 
-  // Rolagem automática contínua (quando ligada)
-  useEffect(() => {
-    if (!isSingerMode || !isAutoScroll) {
-      if (autoScrollRafRef.current) {
-        cancelAnimationFrame(autoScrollRafRef.current);
-        autoScrollRafRef.current = null;
-      }
-      return;
-    }
-    const maxScroll =
-      document.documentElement.scrollHeight - window.innerHeight;
-    const animate = (now: number) => {
-      const deltaSec = (now - autoScrollLastTimeRef.current) / 1000;
-      autoScrollLastTimeRef.current = now;
-      const currentScroll = window.scrollY;
-      if (currentScroll >= maxScroll - 1) {
-        autoScrollRafRef.current = requestAnimationFrame(animate);
-        return;
-      }
-      const toScroll = Math.min(
-        autoScrollSpeed * deltaSec,
-        maxScroll - currentScroll,
-      );
-      window.scrollBy(0, toScroll);
-      autoScrollRafRef.current = requestAnimationFrame(animate);
-    };
-    autoScrollLastTimeRef.current = performance.now();
-    autoScrollRafRef.current = requestAnimationFrame(animate);
-    return () => {
-      if (autoScrollRafRef.current) {
-        cancelAnimationFrame(autoScrollRafRef.current);
-      }
-    };
-  }, [isSingerMode, isAutoScroll, autoScrollSpeed]);
-
   const renderHighlightedText = () => {
     if (!isSingerMode) return text;
 
@@ -563,7 +520,7 @@ export default function Home() {
                 return (
                   <div className="relative min-w-0 self-start">
                     <textarea
-                      placeholder="Cole ou digite a letra aqui. Enter quebra o verso na posição do cursor. Só a página rola."
+                      placeholder="Cole ou digite a letra aqui. Enter quebra o verso na posição do cursor."
                       value={text}
                       onChange={handleChange}
                       name="uppercase"
@@ -787,67 +744,6 @@ export default function Home() {
       >
         <Link2 size={28} color="white" />
       </button>
-      {isSingerMode && (
-        <>
-          <div
-            className={`fixed right-2 top-[340px] flex flex-col gap-2 p-3 rounded-lg shadow-lg ${
-              isDark ? "bg-zinc-800" : "bg-zinc-200"
-            }`}
-          >
-            <span
-              className={`text-xs font-medium ${
-                isDark ? "text-zinc-300" : "text-zinc-700"
-              }`}
-            >
-              Rolagem auto
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsAutoScroll(!isAutoScroll)}
-                title={isAutoScroll ? "Pausar" : "Iniciar"}
-                className={`rounded-full p-2 transition-colors ${
-                  isAutoScroll
-                    ? "bg-amber-500 hover:bg-amber-600"
-                    : "bg-orange-500 hover:bg-orange-600"
-                }`}
-              >
-                {isAutoScroll ? (
-                  <Pause size={24} color="white" />
-                ) : (
-                  <Play size={24} color="white" />
-                )}
-              </button>
-              <div className="flex flex-col gap-0.5 min-w-[80px]">
-                <label
-                  htmlFor="speed"
-                  className={`text-[10px] ${
-                    isDark ? "text-zinc-400" : "text-zinc-600"
-                  }`}
-                >
-                  Velocidade
-                </label>
-                <input
-                  id="speed"
-                  type="range"
-                  min={10}
-                  max={50}
-                  step={5}
-                  value={autoScrollSpeed}
-                  onChange={(e) => setAutoScrollSpeed(Number(e.target.value))}
-                  className="w-full h-2 accent-orange-500"
-                />
-                <span
-                  className={`text-[10px] ${
-                    isDark ? "text-zinc-400" : "text-zinc-600"
-                  }`}
-                >
-                  {autoScrollSpeed} px/s
-                </span>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
       <ToastContainer />
 
       {importOpen && (
