@@ -27,6 +27,12 @@ function processLyricInput(raw: string) {
   return raw.replace(/-/g, " ").toUpperCase();
 }
 
+function formatMmSs(totalSec: number) {
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 function restoreWindowScroll(left: number, top: number) {
   window.scrollTo(left, top);
 }
@@ -67,6 +73,10 @@ export default function Home() {
   const [importOpen, setImportOpen] = useState(false);
   const [importUrl, setImportUrl] = useState("");
   const [importBusy, setImportBusy] = useState(false);
+  const [singerTimerSec, setSingerTimerSec] = useState(0);
+  const singerTimerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
 
   const lyricLines = text === "" ? [] : text.split("\n");
 
@@ -117,6 +127,27 @@ export default function Home() {
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
   }, []);
+
+  useEffect(() => {
+    if (!isSingerMode) {
+      if (singerTimerIntervalRef.current !== null) {
+        clearInterval(singerTimerIntervalRef.current);
+        singerTimerIntervalRef.current = null;
+      }
+      setSingerTimerSec(0);
+      return;
+    }
+    setSingerTimerSec(0);
+    singerTimerIntervalRef.current = setInterval(() => {
+      setSingerTimerSec((t) => t + 1);
+    }, 1000);
+    return () => {
+      if (singerTimerIntervalRef.current !== null) {
+        clearInterval(singerTimerIntervalRef.current);
+        singerTimerIntervalRef.current = null;
+      }
+    };
+  }, [isSingerMode]);
 
   const syncEditTextareaLayout = useCallback(() => {
     if (isSingerMode) return;
@@ -717,6 +748,29 @@ export default function Home() {
           >
             <ChevronUp size={28} />
           </button>
+        </div>
+      )}
+
+      {isSingerMode && (
+        <div
+          className={`fixed left-1/2 top-[4.5rem] z-30 -translate-x-1/2 rounded-lg px-4 py-2 text-center shadow-lg ${
+            isDark
+              ? "bg-zinc-900/95 text-zinc-100 ring-1 ring-zinc-600"
+              : "bg-white/95 text-zinc-900 ring-1 ring-zinc-300"
+          }`}
+          aria-live="polite"
+          aria-label="Tempo no modo cantor"
+        >
+          <span
+            className={`block text-[10px] font-medium uppercase tracking-wide ${
+              isDark ? "text-zinc-400" : "text-zinc-500"
+            }`}
+          >
+            Gravação
+          </span>
+          <span className="font-mono text-2xl tabular-nums tracking-tight">
+            {formatMmSs(singerTimerSec)}
+          </span>
         </div>
       )}
 
